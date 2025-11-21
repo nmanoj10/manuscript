@@ -15,7 +15,8 @@ export const uploadManuscript = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'No file provided' });
     }
     
-    if (!req.userId) {
+    // Allow either a numeric/string userId from JWT or an email fallback from headers
+    if (!req.userId && !req.user?.email) {
       return res.status(401).json({ error: 'User authentication required' });
     }
     
@@ -54,12 +55,16 @@ export const uploadManuscript = async (req: AuthRequest, res: Response) => {
     const imageUrl = optimizedUrl;
     
     // Create upload record
+    // Prefer storing the user's email as the uploader identifier when available,
+    // otherwise fall back to userId. This keeps `getUserUploads` queries consistent.
+    const uploaderId = req.user?.email || req.userId || '';
+
     const upload = new Upload({
       fileName: fileName || `upload-${Date.now()}`,
       originalName: req.file.originalname,
       mimeType: req.file.mimetype,
       size: req.file.size,
-      uploadedBy: req.userId,
+      uploadedBy: uploaderId,
       imageUrl,
       optimizedUrl,
       thumbnailUrl,
@@ -67,8 +72,35 @@ export const uploadManuscript = async (req: AuthRequest, res: Response) => {
     });
     
     await upload.save();
-    
+
+    // Create a lightweight placeholder manuscript so the upload is visible immediately
+    // and can be updated by the background processor. This avoids duplicates and
+    // gives immediate feedback in the frontend.
+    const placeholderManuscript = new Manuscript({
+      userId: manuscriptUserId,
+      title,
+      author,
+      description,
+      category: category || 'General',
+      origin,
+      language,
+      location: location || '',
+      imageUrl,
+      summary: '',
+      tags: [],
+      status: 'published',
+    });
+
+    await placeholderManuscript.save();
+
+    // Link upload -> manuscript so background processor can update the same document
+    upload.manuscriptId = placeholderManuscript._id.toString();
+    await upload.save();
+
     // Process with AI in background; pass original buffer for OCR
+    // Pass a consistent user identifier to the background processor as well.
+    const manuscriptUserId = req.userId || req.user?.email || '';
+
     processManuscriptAsync(
       title,
       author,
@@ -78,7 +110,7 @@ export const uploadManuscript = async (req: AuthRequest, res: Response) => {
       origin,
       language,
       location || '',
-      req.userId,
+      manuscriptUserId,
       upload._id.toString(),
       req.file.buffer,
       optimizedUrl,
@@ -146,37 +178,74 @@ const processManuscriptAsync = async (
     // Generate image hint
     const imageHint = await generateImageHint(title, description);
     
-    // Create manuscript with all fields
-    const manuscript = new Manuscript({
-      userId,
-      title,
-      author,
-      description,
-      category: finalCategory,
-      origin,
-      language,
-      location,
-      ocrText,
-      scriptType: '',
-      dateWritten: '',
-      period: '',
-      significance: '',
-      imageUrl,
-      imageHint,
-      summary,
-      tags,
-      status: 'published',
-    });
-    
-    await manuscript.save();
+    // If an upload placeholder manuscript exists, update it; otherwise create a new manuscript
+    const uploadDoc = await Upload.findById(uploadId);
+    if (uploadDoc && uploadDoc.manuscriptId) {
+      await Manuscript.findByIdAndUpdate(
+        uploadDoc.manuscriptId,
+        {
+          userId,
+          title,
+          author,
+          description,
+          category: finalCategory,
+          origin,
+          language,
+          location,
+          ocrText,
+          scriptType: '',
+          dateWritten: '',
+          period: '',
+          significance: '',
+          imageUrl,
+          imageHint,
+          summary,
+          tags,
+          thumbnailUrl: thumbnailUrl || '',
+          optimizedUrl: optimizedUrl || '',
+          status: 'published',
+        },
+        { new: true }
+      );
 
-    // Update upload status and link to manuscript
-    await Upload.findByIdAndUpdate(uploadId, {
-      status: 'completed',
-      manuscriptId: manuscript._id.toString(),
-      optimizedUrl: optimizedUrl || '',
-      thumbnailUrl: thumbnailUrl || '',
-    });
+      // Update upload status
+      await Upload.findByIdAndUpdate(uploadId, {
+        status: 'completed',
+        optimizedUrl: optimizedUrl || '',
+        thumbnailUrl: thumbnailUrl || '',
+      });
+    } else {
+      const manuscript = new Manuscript({
+        userId,
+        title,
+        author,
+        description,
+        category: finalCategory,
+        origin,
+        language,
+        location,
+        ocrText,
+        scriptType: '',
+        dateWritten: '',
+        period: '',
+        significance: '',
+        imageUrl,
+        imageHint,
+        summary,
+        tags,
+        status: 'published',
+      });
+
+      await manuscript.save();
+
+      // Update upload status and link to manuscript
+      await Upload.findByIdAndUpdate(uploadId, {
+        status: 'completed',
+        manuscriptId: manuscript._id.toString(),
+        optimizedUrl: optimizedUrl || '',
+        thumbnailUrl: thumbnailUrl || '',
+      });
+    }
   } catch (error) {
     console.error('Error processing manuscript:', error);
     // Update upload status to failed
@@ -207,12 +276,18 @@ export const getUploadStatus = async (req: AuthRequest, res: Response) => {
 export const getUserUploads = async (req: AuthRequest, res: Response) => {
   try {
     const email = req.user?.email;
-    
-    if (!email) {
+    const userId = req.userId;
+
+    if (!email && !userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    
-    const uploads = await Upload.find({ uploadedBy: email }).sort({ createdAt: -1 });
+
+    // Match uploads where uploadedBy equals the email or the userId (for older records)
+    const queryValues = [] as string[];
+    if (email) queryValues.push(email);
+    if (userId) queryValues.push(userId);
+
+    const uploads = await Upload.find({ uploadedBy: { $in: queryValues } }).sort({ createdAt: -1 });
     
     res.json(uploads);
   } catch (error) {
