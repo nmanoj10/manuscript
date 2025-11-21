@@ -10,6 +10,7 @@ export interface IUpload extends Document {
   fileUrl?: string;
   thumbnailUrl?: string;
   optimizedUrl?: string;
+  manuscriptId?: string;
   status: 'processing' | 'completed' | 'failed';
   createdAt: Date;
   updatedAt: Date;
@@ -22,12 +23,12 @@ const UploadSchema = new Schema<IUpload>(
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },
     uploadedBy: { type: String, required: true },
-      imageUrl: { type: String, required: true },
-      fileUrl: String,
-      thumbnailUrl: { type: String, default: '' },
-      optimizedUrl: { type: String, default: '' },
-      manuscriptId: { type: String, default: '' },
-      status: { type: String, enum: ['processing', 'completed', 'failed'], default: 'processing' },
+    imageUrl: { type: String, required: true },
+    fileUrl: String,
+    thumbnailUrl: { type: String, default: '' },
+    optimizedUrl: { type: String, default: '' },
+    manuscriptId: { type: String, default: '' },
+    status: { type: String, enum: ['processing', 'completed', 'failed'], default: 'processing' },
   },
   { timestamps: true }
 );

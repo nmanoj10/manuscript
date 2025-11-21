@@ -54,6 +54,8 @@ const startServer = async () => {
     console.log(`Vision OCR configured: ${visionReady}`);
     console.log(`Gemini configured: ${!!process.env.GEMINI_API_KEY}`);
 
+    // Background worker removed - using synchronous processing instead
+
     app.listen(PORT, () => {
       console.log(`✓ Server running on http://localhost:${PORT}`);
     });
