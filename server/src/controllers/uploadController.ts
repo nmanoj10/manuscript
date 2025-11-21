@@ -73,6 +73,10 @@ export const uploadManuscript = async (req: AuthRequest, res: Response) => {
     
     await upload.save();
 
+    // Pass a consistent user identifier to the background processor as well
+    // and use the same identifier for the placeholder manuscript.
+    const manuscriptUserId = req.userId || req.user?.email || '';
+
     // Create a lightweight placeholder manuscript so the upload is visible immediately
     // and can be updated by the background processor. This avoids duplicates and
     // gives immediate feedback in the frontend.
@@ -98,8 +102,6 @@ export const uploadManuscript = async (req: AuthRequest, res: Response) => {
     await upload.save();
 
     // Process with AI in background; pass original buffer for OCR
-    // Pass a consistent user identifier to the background processor as well.
-    const manuscriptUserId = req.userId || req.user?.email || '';
 
     processManuscriptAsync(
       title,
