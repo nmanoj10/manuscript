@@ -394,7 +394,10 @@ Contributions are welcome! Please:
 ---
 
 **Created with ❤️ for manuscript preservation and digital heritage**
-#   T h e - C o d e r s  
- #   T h e - C o d e r s  
- #   m a n u s c r i p t  
+#   T h e - C o d e r s 
+ 
+ #   T h e - C o d e r s 
+ 
+ #   m a n u s c r i p t 
+ 
  
